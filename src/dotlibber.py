@@ -54,11 +54,19 @@ class Library:
         self.corners = []
         for c in corners:
             self.add_corner(c)
+        # Check that all corners have the same voltage names
+        for c in self.corners:
+            if (set(c.voltage_map.keys()) != set(self.voltage_names())):
+                sys.stderr.write("Error: all corners must have the same voltage names! Aborting.\n")
+                exit(1)
         require_key(self,"cells")
         self.cells = []
         self.library_namer = library_namer
         for a in self.attr["cells"]:
             self.add_cell(a)
+
+    def voltage_names(self):
+        return self.corners[0].voltage_map.keys()
 
     def add_cell(self, cell_attr):
         self.cells.append(Cell(self, cell_attr))
@@ -100,9 +108,6 @@ class Library:
             except OSError:
                 pass
             open(f,"w").write(self.emit(corner))
-
-
-
 
 class Cell:
 
@@ -189,6 +194,7 @@ class PGPin:
         self.name = get_name(self)
         # For now only implement primary power/ground. If anyone needs secondary power/ground, you get to update this!
         require_values(self, "pg_type", ["primary_power", "primary_ground"])
+        require_values(self, "name", self.cell.lib.voltage_names())
         self.type = self.attr["pg_type"]
 
     def emit(self):

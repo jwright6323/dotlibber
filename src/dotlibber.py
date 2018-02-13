@@ -28,7 +28,7 @@ class Corner:
         output += "nom_voltage : %f;\n" % self.voltage
         for k in self.voltage_map:
             output += "voltage_map(%s, %f);\n" % (k, self.voltage_map[k])
-        output += "operating_conditions(%s) {\n" % self.name
+        output += "operating_conditions(\"%s\") {\n" % self.name
         output += indent("process : %d;\n") % self.process
         output += indent("temperature : %d;\n") % self.temperature
         output += indent("voltage : %f;\n") % self.voltage

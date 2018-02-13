@@ -8,14 +8,44 @@ from datetime import datetime
 # Define how many spaces are in an indentation
 IWIDTH = 4
 
-class Lib:
+class Corner:
 
     def __init__(self, attr):
         self.attr = attr
         self.name = get_name(self)
+        self.process = try_convert_int(self, "process")
+        self.temperature = try_convert_int(self, "temperature")
+        require_key(self, "voltage_map")
+        require_float(self, "nominal_voltage")
+        self.voltage = self.attr["nominal_voltage"]
+        self.voltage_map = {}
+        for k in self.attr["voltage_map"]:
+            self.voltage_map[k] = float(self.attr["voltage_map"][k])
+
+    def emit(self):
+        output  = "nom_process : %d;\n" % self.process
+        output += "nom_temperature : %d;\n" % self.temperature
+        output += "nom_voltage : %f;\n" % self.voltage
+        for k in self.voltage_map:
+            output += "voltage_map(%s, %f);\n" % (k, self.voltage_map[k])
+        output += "operating_conditions(%s) {\n" % self.name
+        output += indent("process : %d;\n") % self.process
+        output += indent("temperature : %d;\n") % self.temperature
+        output += indent("voltage : %f;\n") % self.voltage
+        output += "}\n"
+        output += "default_operating_conditions : %s;\n" % self.name
+        return output
+
+class Lib:
+
+    def __init__(self, attr, corners):
+        self.attr = attr
+        self.name = get_name(self)
         self.datetime = datetime.now().strftime("%c")
         require_int(self,"revision")
-        # TODO corner stuff
+        self.corners = []
+        for c in corners:
+            self.add_corner(c)
         require_key(self,"cells")
         self.cells = []
         for a in self.attr["cells"]:
@@ -24,10 +54,14 @@ class Lib:
     def add_cell(self, cell_attr):
         self.cells.append(Cell(self, cell_attr))
 
+    def add_corner(self, corner_attr):
+        self.corners.append(Corner(corner_attr))
 
+    def corner_name(self, corner):
+        return self.name + "_" + corner.name
 
-    def emit(self):
-        output  = "library (%s) {\n" % self.name
+    def emit(self, corner):
+        output  = "library (%s) {\n" % self.corner_name(corner)
         header  = "technology (cmos);\n"
         # Assert that we're only doing NLDM
         header += "delay_model : table_lookup;\n"
@@ -41,8 +75,8 @@ class Lib:
         header += "current_unit : \"1mA\";\n"
         header += "time_unit : \"1ns\";\n"
         header += "pulling_resistance_unit : \"1kohm\";\n"
-        # TODO emit cells
         output += indent(header)
+        output += indent(corner.emit())
         output += "\n"
         for c in self.cells:
             output += indent(c.emit())
@@ -50,7 +84,6 @@ class Lib:
 
         output += "}\n"
         return output
-
 
 
 class Cell:
@@ -63,6 +96,7 @@ class Cell:
         require_key(self, "pins")
         self.pg_pins = []
         self.pins = []
+        self.clocks = []
         for p in self.attr["pg_pins"]:
             self.add_pg_pin(p)
         for p in self.attr["pins"]:
@@ -80,6 +114,8 @@ class Cell:
     def add_pin(self, pin_attr):
         self.pins.append(Pin(self, pin_attr))
 
+    def add_clock(self, pin):
+        self.clocks.append(pin)
 
     def emit(self):
         output  = "cell (%s) {\n" % self.name
@@ -101,8 +137,11 @@ class Pin:
         self.name = get_name(self)
         require_values(self, "direction", ["input", "output", "inout"])
         optional_values(self, "is_analog", ["true", "false"], "false")
+        optional_values(self, "clock", ["true", "false"], "false")
         # Digital pin checks
         if self.attr["is_analog"] == "false":
+            if self.attr["clock"] == "true":
+                self.cell.add_clock(self)
             if self.attr["direction"] == "inout":
                 sys.stderr.write("Digital inout pins are not supported. FIXME. Aborting\n")
                 exit(1)
@@ -124,7 +163,6 @@ class Pin:
         output += "}\n"
         return output
 
-
 class PGPin:
 
     def __init__(self, cell, attr):
@@ -142,8 +180,6 @@ class PGPin:
         output += indent("voltage_name : %s;\n" % self.name)
         output += "}\n"
         return output
-
-
 
 def get_name(obj):
     if "name" not in obj.attr.keys():
@@ -192,19 +228,23 @@ def require_float(obj, key):
 def require_int(obj, key):
     try_convert_int(obj, key)
 
-# TODO don't indent empty lines
 def indent(s, lvl=1):
     return re.compile('^([^$])',re.MULTILINE).sub(" " * IWIDTH * lvl + "\\1", s)
 
-
 def __main__():
-    filename = "../conf/test.json"
+    libfile = "../conf/test.json"
     try:
-        attr = json.load(file(filename))
+        lib_attr = json.load(file(libfile))
     except:
-        sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % filename)
+        sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % libfile)
         exit(1)
-    lib = Lib(attr)
-    print(lib.emit())
+    cornerfile = "../conf/corners.json"
+    try:
+        corner_attr = json.load(file(cornerfile))["corners"]
+    except:
+        sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % cornerfile)
+        exit(1)
+    lib = Lib(lib_attr, corner_attr)
+    print(lib.emit(lib.corners[0]))
 
 __main__()

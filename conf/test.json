@@ -1,0 +1,37 @@
+{
+    "name" : "test_library",
+    "revision" : 0,
+    "cells" : [
+        {
+            "name" : "test_cell0",
+            "pins" : [
+                {
+                    "direction" : "input",
+                    "name" : "foo",
+                    "foo" : "bar",
+                    "capacitance" : "0.1",
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                },
+                {
+                    "direction" : "output",
+                    "name" : "baz",
+                    "capacitance" : "0.1",
+                    "foo" : "bar",
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                }
+            ],
+            "pg_pins" : [
+                {
+                    "name" : "VDD",
+                    "pg_type" : "primary_power"
+                },
+                {
+                    "name" : "VSS",
+                    "pg_type" : "primary_ground"
+                }
+            ]
+        }
+    ]
+}

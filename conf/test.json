@@ -19,7 +19,16 @@
                     "name" : "bar",
                     "direction" : "output",
                     "max_capacitance" : 0.5,
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                },
+                {
+                    "name" : "bustest[15:0]",
+                    "direction" : "input",
+                    "capacitance" : 0.4,
                     "max_transition" : 0.2,
+                    "sequential" : true,
+                    "related_clock" : "clock",
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 },

@@ -170,7 +170,19 @@ class Cell:
         for p in self.attr["pg_pins"]:
             self.add_pg_pin(p)
         for p in self.attr["pins"]:
-            self.add_pin(p)
+            m = re.match(r"^([\w_]+)\[(\d+):(\d+)]$", p["name"]) if "name" in p.keys() else False
+            if m:
+                # This is a bus
+                a = int(m.group(2))
+                b = int(m.group(3))
+                lower = min(a,b)
+                upper = max(a,b)
+                base = m.group(1)
+                for x in range(upper-lower):
+                    p["name"] = base + "[%d]" % (lower+x)
+                    self.add_pin(p)
+            else:
+                self.add_pin(p)
         for p in self.sequential_pins:
             for c in self.lib.corners:
                 p.generate_arcs(c)

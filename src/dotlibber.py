@@ -26,6 +26,24 @@ class Corner:
         self.voltage_map = {}
         for k in self.attr["voltage_map"]:
             self.voltage_map[k] = float(self.attr["voltage_map"][k])
+        require_key(self, "constraint_template")
+        require_key(self, "delay_template")
+        try:
+            x = self.attr["constraint_template"]
+            self.constraint_template = LUTTemplate("constraint_template_%dx%d" % (len(x["related_pin_transition"]),len(x["constrained_pin_transition"])),
+                "related_pin_transition",
+                x["constrained_pin_transition"],
+                "constrained_pin_transition",
+                x["constrained_pin_transition"])
+            x = self.attr["delay_template"]
+            self.delay_template = LUTTemplate("delay_template_%dx%d" % (len(x["input_net_transition"]),len(x["total_output_net_capacitance"])),
+                "input_net_transition",
+                x["input_net_transition"],
+                "total_output_net_capacitance",
+                x["total_output_net_capacitance"])
+        except:
+            sys.stderr.write("Error reading LUT templates for corner \"%s\". Aborting.\n" % self.name)
+            exit(1)
 
     def emit(self):
         output  = "nom_process : %d;\n" % self.process
@@ -39,6 +57,8 @@ class Corner:
         output += indent("voltage : %f;\n") % self.voltage
         output += "}\n"
         output += "default_operating_conditions : %s;\n" % self.name
+        output += self.constraint_template.emit()
+        output += self.delay_template.emit()
         return output
 
 class Library:
@@ -90,7 +110,7 @@ class Library:
         output += indent(header)
         output += "\n"
         for c in self.cells:
-            output += indent(c.emit())
+            output += indent(c.emit(corner))
             output += "\n"
 
         output += "}\n"
@@ -105,6 +125,25 @@ class Library:
             except OSError:
                 pass
             open(f,"w").write(self.emit(corner))
+
+class LUTTemplate:
+
+    def __init__(self, name, var1, index_1, var2=None, index_2=[]):
+        self.name = name
+        self.var1 = var1
+        self.var2 = var2
+        self.index_1 = index_1
+        self.index_2 = index_2
+        self.twod = var2 is not None
+
+    def emit(self):
+        output  = "variable_1 : %s;\n" % self.var1
+        if self.twod:
+            output += "variable_2 : %s;\n" % self.var2
+        output += "index_1 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_1))
+        if self.twod:
+            output += "index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2))
+        return "lu_table_template (%s) {\n" % self.name + indent(output) + "}\n"
 
 class Cell:
 
@@ -123,7 +162,8 @@ class Cell:
         for p in self.attr["pins"]:
             self.add_pin(p)
         for p in self.sequential_pins:
-            p.generate_arcs()
+            for c in self.lib.corners:
+                p.generate_arcs(c)
 
     def power_pins(self):
         return filter(lambda x: x.type == "primary_power", self.pg_pins)
@@ -146,7 +186,7 @@ class Cell:
     def add_sequential_pin(self, pin):
         self.sequential_pins.append(pin)
 
-    def emit(self):
+    def emit(self, corner):
         output  = "cell (%s) {\n" % self.name
         # For now, always dont_touch, dont_use macros. We aren't using this for std cells.
         output += indent("dont_use : true;\n")
@@ -154,7 +194,7 @@ class Cell:
         output += indent("is_macro_cell : true;\n")
         for p in self.pg_pins + self.pins:
             output += "\n"
-            output += indent(p.emit())
+            output += indent(p.emit(corner))
         output += "}\n"
         return output
 
@@ -164,7 +204,9 @@ class Pin:
         self.cell = cell
         self.attr = attr
         self.name = get_name(self)
-        self.arcs = []
+        self.arcs = {}
+        for c in self.cell.lib.corners:
+            self.arcs[c] = []
         # Use a list here to enforce an ordering
         self.output_attr = []
         self.output_attr.append(("direction", require_values(self, "direction", ["input", "output", "inout"])))
@@ -215,33 +257,33 @@ class Pin:
     def has_attr(self, attr):
         return attr in self.attr.keys()
 
-    def generate_arcs(self):
+    def generate_arcs(self, corner):
         if self.related_clock_name not in self.cell.clocks.keys():
             sys.stderr.write("Related clock pin \"%s\" of pin \"%s\" of cell \"%s\" is not defined as a clock. Please give it the \"clock : true\" attribute. Aborting.\n" % (self.related_clock_name, self.name, self.cell.name))
             exit(1)
         else:
             if self.direction == "input":
-                self.arcs.append(SetupArc(self, self.get_related_clock()))
-                self.arcs.append(HoldArc(self, self.get_related_clock()))
+                self.arcs[corner].append(SetupArc(self, self.get_related_clock(), corner))
+                self.arcs[corner].append(HoldArc(self, self.get_related_clock(), corner))
             elif self.direction == "output":
-                self.arcs.append(ClockToQArc(self, self.get_related_clock()))
+                self.arcs[corner].append(ClockToQArc(self, self.get_related_clock(), corner))
             else:
                 raise Exception("Should not get here, fix me. You have an inout sequential pin, or something else went wrong.")
 
-    # TODO emit timing arcs
-    def emit(self):
+    def emit(self, corner):
         attributes = "".join(map(lambda x: "%s : %s;\n" % (x[0], x[1]), self.output_attr))
-        for a in self.arcs:
+        # TODO some attributes are corner-specific (cap, max_cap, etc.) and need to be characterized
+        for a in self.arcs[corner]:
             attributes += a.emit()
         return "pin (%s) {\n" % self.name + indent(attributes) + "}\n"
 
 class SetupArc:
 
-    def __init__(self, pin, related_pin):
+    def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = DataTable("rise_constraint", self)
-        self.fall_constraint = DataTable("fall_constraint", self)
+        self.rise_constraint = DataTable("rise_constraint", corner.delay_template,  self)
+        self.fall_constraint = DataTable("fall_constraint", corner.delay_template,  self)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -253,11 +295,11 @@ class SetupArc:
 
 class HoldArc:
 
-    def __init__(self, pin, related_pin):
+    def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = DataTable("rise_constraint", self)
-        self.fall_constraint = DataTable("fall_constraint", self)
+        self.rise_constraint = DataTable("rise_constraint", corner.delay_template, self)
+        self.fall_constraint = DataTable("fall_constraint", corner.delay_template, self)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -269,13 +311,13 @@ class HoldArc:
 
 class ClockToQArc:
 
-    def __init__(self, pin, related_pin):
+    def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.cell_rise = DataTable("cell_rise", self)
-        self.cell_fall = DataTable("cell_fall", self)
-        self.rise_transition = DataTable("rise_transition", self)
-        self.fall_transition = DataTable("fall_transition", self)
+        self.cell_rise = DataTable("cell_rise", corner.constraint_template, self)
+        self.cell_fall = DataTable("cell_fall", corner.constraint_template, self)
+        self.rise_transition = DataTable("rise_transition", corner.constraint_template, self)
+        self.fall_transition = DataTable("fall_transition", corner.constraint_template, self)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -291,17 +333,26 @@ class ClockToQArc:
 
 class DataTable:
 
-    def __init__(self, name, pin):
+    def __init__(self, name, template, pin):
         self.name = name
-        self.template_name = "template_3x3"
-        self.index_1 = [0.01, 0.02, 0.03]
-        self.index_2 = [0.01, 0.02, 0.03]
-        self.data = [[0.01, 0.02, 0.03,],[0.04,0.05,0.06],[0.07,0.08,0.09]]
+        self.template = template
+        self.index_1 = template.index_1
+        self.index_2 = template.index_2
+        self.twod = template.twod
+        # Sanity check
+        for x in self.index_1 + self.index_2:
+            if type(x) != type(0.0):
+                raise
+        if self.twod:
+            self.data = [[0.0]*len(template.index_1)]*len(template.index_2) #TODO populate with SPICE
+        else:
+            self.data = [[0.0]*len(template.index_1)] #TODO populate with SPICE
 
     def emit(self):
-        output  = "%s (%s) {\n" % (self.name, self.template_name)
+        output  = "%s (%s) {\n" % (self.name, self.template.name)
         output += indent("index_1 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_1)))
-        output += indent("index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2)))
+        if self.twod:
+            output += indent("index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2)))
         output += indent("values ( \\\n")
         output += indent(", \\\n".join(map(lambda y: "\"" + ", ".join(map(lambda x: x.__str__(), y)) + "\"", self.data)) + " \\\n",2)
         output += indent(");\n")
@@ -319,7 +370,7 @@ class PGPin:
         require_values(self, "name", self.cell.lib.voltage_names())
         self.type = self.attr["pg_type"]
 
-    def emit(self):
+    def emit(self, corner):
         output = "pg_pin (%s) {\n" % self.name
         output += indent("pg_type : %s;\n" % self.type)
         # For now assert that voltage_name is the same as the pin name

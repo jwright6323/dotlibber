@@ -2,23 +2,39 @@
     "corners" :
     [
         {
-            "name" : "ssgnp0p72v125c",
+            "name" : "ss0p80v125c",
             "process" : 1,
             "temperature" : 125,
-            "nominal_voltage" : 0.72,
+            "nominal_voltage" : 0.8,
             "voltage_map" : {
-                "VDD" : 0.72,
+                "VDD" : 0.8,
                 "VSS" : 0.0
+            },
+            "constraint_template" : {
+                "related_pin_transition" : [0.0002, 0.0004, 0.0006],
+                "constrained_pin_transition" : [0.0002, 0.0004, 0.0006]
+            },
+            "delay_template" : {
+                "input_net_transition" : [0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008],
+                "total_output_net_capacitance" : [0.0011, 0.0022, 0.0033, 0.0044, 0.0055, 0.0066, 0.0077, 0.0088]
             }
         },
         {
-            "name" : "ffgnp0p88v0c",
+            "name" : "ff1p20v0c",
             "process" : 1,
             "temperature" : 0,
-            "nominal_voltage" : 0.88,
+            "nominal_voltage" : 1.2,
             "voltage_map" : {
-                "VDD" : 0.88,
+                "VDD" : 1.2,
                 "VSS" : 0.0
+            },
+            "constraint_template" : {
+                "related_pin_transition" : [0.0001, 0.0002, 0.0003],
+                "constrained_pin_transition" : [0.0001, 0.0002, 0.0003]
+            },
+            "delay_template" : {
+                "input_net_transition" : [0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008, 0.0009, 0.0010],
+                "total_output_net_capacitance" : [0.0011, 0.0022, 0.0033, 0.0044, 0.0055, 0.0066, 0.0077, 0.0088]
             }
         }
     ]

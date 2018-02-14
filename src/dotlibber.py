@@ -221,7 +221,7 @@ class Pin:
             exit(1)
         else:
             if self.direction == "input":
-                self.arcs.append(SetupQArc(self, self.get_related_clock()))
+                self.arcs.append(SetupArc(self, self.get_related_clock()))
                 self.arcs.append(HoldArc(self, self.get_related_clock()))
             elif self.direction == "output":
                 self.arcs.append(ClockToQArc(self, self.get_related_clock()))
@@ -245,7 +245,7 @@ class SetupArc:
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
-        # XXX we only support rising edge clocks!
+        # Note that we only support rising clocks for now
         output += "timing_type : setup_rising;\n"
         output += self.rise_constraint.emit()
         output += self.fall_constraint.emit()
@@ -261,7 +261,7 @@ class HoldArc:
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
-        # XXX we only support rising edge clocks!
+        # Note that we only support rising clocks for now
         output += "timing_type : hold_rising;\n"
         output += self.rise_constraint.emit()
         output += self.fall_constraint.emit()
@@ -280,7 +280,7 @@ class ClockToQArc:
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
         output += "timing_sense : non_unate;\n"
-        # XXX we only support rising edge clocks!
+        # Note that we only support rising clocks for now
         output += "timing_type : rising_edge;\n"
         output += self.cell_rise.emit()
         output += self.rise_transition.emit()

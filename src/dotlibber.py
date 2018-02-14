@@ -111,7 +111,7 @@ class Library:
         header += "delay_model : table_lookup;\n"
         header += "simulation : true;\n"
         # Here are a bunch of unit specs that nobody ever changes.
-        header += "capacitive_load_unit : \"1pF\";\n"
+        header += "capacitive_load_unit (1,pf);\n"
         header += "voltage_unit : \"1V\";\n"
         header += "current_unit : \"1mA\";\n"
         header += "time_unit : \"1ns\";\n"

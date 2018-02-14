@@ -268,7 +268,8 @@ def read_library_json(libfile, cornerfile, library_namer=default_library_namer):
         exit(1)
     return Library(lib_attr, corner_attr, library_namer)
 
-def __main__():
+def main():
     read_library_json("../conf/test.json", "../conf/corners.json").write_all()
 
-__main__()
+if __name__ == "__main__":
+    main()

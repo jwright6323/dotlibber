@@ -2,26 +2,22 @@
     "corners" :
     [
         {
-            "name" : "ssgnp0p7v125c",
+            "name" : "ssgnp0p72v125c",
             "process" : 1,
             "temperature" : 125,
-            "models" : "ssgnp",
-            "nominal_voltage" : 0.7,
+            "nominal_voltage" : 0.72,
             "voltage_map" : {
-                "VDD" : 0.7,
-                "VDDA" : 1.8,
+                "VDD" : 0.72,
                 "VSS" : 0.0
             }
         },
         {
-            "name" : "ssgnp0p7vm40c",
+            "name" : "ffgnp0p88v0c",
             "process" : 1,
-            "temperature" : -40,
-            "models" : "ssgnp",
-            "nominal_voltage" : 0.7,
+            "temperature" : 0,
+            "nominal_voltage" : 0.88,
             "voltage_map" : {
-                "VDD" : 0.7,
-                "VDDA" : 1.8,
+                "VDD" : 0.88,
                 "VSS" : 0.0
             }
         }

@@ -6,18 +6,23 @@
             "name" : "test_cell0",
             "pins" : [
                 {
-                    "direction" : "input",
                     "name" : "foo",
-                    "foo" : "bar",
-                    "capacitance" : "0.1",
+                    "direction" : "input",
+                    "capacitance" : 0.1,
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 },
                 {
+                    "name" : "bar",
                     "direction" : "output",
+                    "max_capacitance" : 0.5,
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                },
+                {
                     "name" : "baz",
-                    "capacitance" : "0.1",
-                    "foo" : "bar",
+                    "direction" : "inout",
+                    "is_analog" : true,
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 }

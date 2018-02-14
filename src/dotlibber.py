@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import os
 import re
 import json
@@ -21,11 +19,10 @@ class Corner:
     def __init__(self, attr):
         self.attr = attr
         self.name = get_name(self)
-        self.process = try_convert_int(self, "process")
-        self.temperature = try_convert_int(self, "temperature")
+        self.process = require_int(self, "process")
+        self.temperature = require_int(self, "temperature")
         require_key(self, "voltage_map")
-        require_float(self, "nominal_voltage")
-        self.voltage = self.attr["nominal_voltage"]
+        self.voltage = require_float(self, "nominal_voltage")
         self.voltage_map = {}
         for k in self.attr["voltage_map"]:
             self.voltage_map[k] = float(self.attr["voltage_map"][k])
@@ -89,8 +86,8 @@ class Library:
         header += "current_unit : \"1mA\";\n"
         header += "time_unit : \"1ns\";\n"
         header += "pulling_resistance_unit : \"1kohm\";\n"
+        header += corner.emit()
         output += indent(header)
-        output += indent(corner.emit())
         output += "\n"
         for c in self.cells:
             output += indent(c.emit())
@@ -158,33 +155,39 @@ class Pin:
         self.cell = cell
         self.attr = attr
         self.name = get_name(self)
-        require_values(self, "direction", ["input", "output", "inout"])
-        optional_values(self, "is_analog", ["true", "false"], "false")
-        optional_values(self, "clock", ["true", "false"], "false")
+        # Use a list here to enforce an ordering
+        self.output_attr = []
+        self.output_attr.append(("direction", require_values(self, "direction", ["input", "output", "inout"])))
+        optional_values(self, "is_analog", [True, False], False)
+        optional_values(self, "clock", [True, False], False)
         # Digital pin checks
-        if self.attr["is_analog"] == "false":
-            if self.attr["clock"] == "true":
+        if not self.attr["is_analog"]:
+            if self.attr["clock"]:
                 self.cell.add_clock(self)
+                self.output_attr.append(("clock", "true"))
             if self.attr["direction"] == "inout":
                 sys.stderr.write("Digital inout pins are not supported. FIXME. Aborting\n")
                 exit(1)
-            require_float(self, "capacitance")
+            if self.attr["direction"] == "input":
+                self.output_attr.append(("capacitance", require_float(self, "capacitance")))
+            if self.attr["direction"] == "output":
+                self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance")))
             # Assert that we must have a power pin with the name in our PG pin list
             require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()))
             # Assert that we must have a ground pin with the name in our PG pin list
             require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()))
+        else:
+            self.output_attr.append(("is_analog", "true"))
 
 
     def has_attr(self, attr):
         return attr in self.attr.keys()
 
     # TODO emit timing arcs
+    # TODO is there a better way to handle this
     def emit(self):
-        output  = "pin (%s) {\n" % self.name
-        for k in self.attr:
-            output += "    %s : %s;\n" % (k, self.attr[k])
-        output += "}\n"
-        return output
+        attributes = "".join(map(lambda x: "%s : %s;\n" % (x[0], x[1]), self.output_attr))
+        return "pin (%s) {\n" % self.name + indent(attributes) + "}\n"
 
 class PGPin:
 
@@ -221,6 +224,7 @@ def require_values(obj, key, values):
     if obj.attr[key] not in values:
         sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Allowed values are %s. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name, ', '.join(values)))
         exit(1)
+    return obj.attr[key]
 
 def optional_values(obj, key, values, default=None):
     if key in obj.attr:
@@ -229,28 +233,19 @@ def optional_values(obj, key, values, default=None):
         if default is not None:
             obj.attr[key] = default
             require_values(obj, key, values)
-
-def try_convert_float(obj, key):
-    require_key(obj, key)
-    try:
-        return float(obj.attr[key])
-    except:
-        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
-        exit(1)
-
-def try_convert_int(obj, key):
-    require_key(obj, key)
-    try:
-        return int(obj.attr[key])
-    except:
-        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
-        exit(1)
+    return obj.attr[key]
 
 def require_float(obj, key):
-    try_convert_float(obj, key)
+    if (type(obj.attr[key]) != type(0.0)):
+        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
+        exit(1)
+    return obj.attr[key]
 
 def require_int(obj, key):
-    try_convert_int(obj, key)
+    if (type(obj.attr[key]) != type(0)):
+        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
+        exit(1)
+    return obj.attr[key]
 
 def indent(s, lvl=1):
     return re.compile('^([^\n])',re.MULTILINE).sub(" " * IWIDTH * lvl + "\\1", s)
@@ -267,9 +262,3 @@ def read_library_json(libfile, cornerfile, library_namer=default_library_namer):
         sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % cornerfile)
         exit(1)
     return Library(lib_attr, corner_attr, library_namer)
-
-def main():
-    read_library_json("../conf/test.json", "../conf/corners.json").write_all()
-
-if __name__ == "__main__":
-    main()

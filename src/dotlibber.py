@@ -7,6 +7,9 @@ from datetime import datetime
 # Define how many spaces are in an indentation
 IWIDTH = 4
 
+def to_s(foo):
+    return foo.__str__()
+
 # Default function to name the .lib, passed to the Library constructor
 def default_library_namer(lib, corner):
     return lib.name + "_" + corner.name
@@ -14,14 +17,21 @@ def default_library_namer(lib, corner):
 def default_file_namer(lib, corner):
     return os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "output", default_library_namer(lib, corner) + ".lib")
 
+default_characterizer_global = 0.0
+def default_characterizer(arc_type, corner, params):
+    global default_characterizer_global
+    default_characterizer_global += 0.1
+    return default_characterizer_global
+
 class Corner:
 
-    def __init__(self, attr):
+    def __init__(self, attr, characterizer):
         self.attr = attr
         self.name = get_name(self)
         self.process = require_int(self, "process")
         self.temperature = require_int(self, "temperature")
         require_key(self, "voltage_map")
+        self.characterizer = characterizer
         self.voltage = require_float(self, "nominal_voltage")
         self.voltage_map = {}
         for k in self.attr["voltage_map"]:
@@ -63,14 +73,14 @@ class Corner:
 
 class Library:
 
-    def __init__(self, attr, corners, library_namer=default_library_namer):
+    def __init__(self, attr, corners, library_namer=default_library_namer, characterizer=default_characterizer):
         self.attr = attr
         self.name = get_name(self)
         self.datetime = datetime.now().strftime("%c")
         require_int(self,"revision")
         self.corners = []
         for c in corners:
-            self.add_corner(c)
+            self.add_corner(c, characterizer)
         # Check that all corners have the same voltage names
         for c in self.corners:
             if (set(c.voltage_map.keys()) != set(self.voltage_names())):
@@ -88,8 +98,8 @@ class Library:
     def add_cell(self, cell_attr):
         self.cells.append(Cell(self, cell_attr))
 
-    def add_corner(self, corner_attr):
-        self.corners.append(Corner(corner_attr))
+    def add_corner(self, corner_attr, characterizer):
+        self.corners.append(Corner(corner_attr, characterizer))
 
     def emit(self, corner):
         output  = "library (%s) {\n" % self.library_namer(self, corner)
@@ -140,9 +150,9 @@ class LUTTemplate:
         output  = "variable_1 : %s;\n" % self.var1
         if self.twod:
             output += "variable_2 : %s;\n" % self.var2
-        output += "index_1 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_1))
+        output += "index_1 (\"%s\");\n" % ", ".join(map(to_s, self.index_1))
         if self.twod:
-            output += "index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2))
+            output += "index_2 (\"%s\");\n" % ", ".join(map(to_s, self.index_2))
         return "lu_table_template (%s) {\n" % self.name + indent(output) + "}\n"
 
 class Cell:
@@ -282,8 +292,8 @@ class SetupArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = DataTable("rise_constraint", corner.delay_template,  self)
-        self.fall_constraint = DataTable("fall_constraint", corner.delay_template,  self)
+        self.rise_constraint = generate_data_table("rise_constraint", pin, related_pin, corner.delay_template, corner)
+        self.fall_constraint = generate_data_table("fall_constraint", pin, related_pin, corner.delay_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -298,8 +308,8 @@ class HoldArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = DataTable("rise_constraint", corner.delay_template, self)
-        self.fall_constraint = DataTable("fall_constraint", corner.delay_template, self)
+        self.rise_constraint = generate_data_table("rise_constraint", pin, related_pin, corner.delay_template, corner)
+        self.fall_constraint = generate_data_table("fall_constraint", pin, related_pin, corner.delay_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -314,10 +324,10 @@ class ClockToQArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.cell_rise = DataTable("cell_rise", corner.constraint_template, self)
-        self.cell_fall = DataTable("cell_fall", corner.constraint_template, self)
-        self.rise_transition = DataTable("rise_transition", corner.constraint_template, self)
-        self.fall_transition = DataTable("fall_transition", corner.constraint_template, self)
+        self.cell_rise = generate_data_table("cell_rise", pin, related_pin, corner.constraint_template, corner)
+        self.cell_fall = generate_data_table("cell_fall", pin, related_pin, corner.constraint_template, corner)
+        self.rise_transition = generate_data_table("rise_transition", pin, related_pin, corner.constraint_template, corner)
+        self.fall_transition = generate_data_table("fall_transition", pin, related_pin, corner.constraint_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -330,10 +340,22 @@ class ClockToQArc:
         output += self.fall_transition.emit()
         return "timing () {\n" + indent(output) + "}\n"
 
+def generate_data_table(arc_type, pin, related_pin, template, corner):
+    len1 = len(template.index_1)
+    len2 = len(template.index_2) if template.twod else 1
+    data = [[None for i in range(len1)] for j in range(len2)]
+    params = {}
+    for x2 in range(len2):
+        for x1 in range(len1):
+            params[template.var1] = template.index_1[x1]
+            if template.twod:
+                params[template.var2] = template.index_2[x2]
+            data[x2][x1] = corner.characterizer(arc_type, corner, params)
+    return DataTable(arc_type, template, data)
 
 class DataTable:
 
-    def __init__(self, name, template, pin):
+    def __init__(self, name, template, data):
         self.name = name
         self.template = template
         self.index_1 = template.index_1
@@ -344,17 +366,34 @@ class DataTable:
             if type(x) != type(0.0):
                 raise
         if self.twod:
-            self.data = [[0.0]*len(template.index_1)]*len(template.index_2) #TODO populate with SPICE
+            self.data = data
+            # Sanity check dimensions and floats
+            if len(self.data) != len(self.index_2):
+                raise
+            for x2 in range(len(self.index_2)):
+                if len(self.data[x2]) != len(self.index_2):
+                    raise
+                for x1 in range(len(self.index_1)):
+                    if type(data[x2][x1]) != type(0.0):
+                        raise
         else:
-            self.data = [[0.0]*len(template.index_1)] #TODO populate with SPICE
+            self.data = data
+            # Sanity check dimensions and floats
+            if len(self.data[0]) != len(self.index_1):
+                raise
+            if len(self.data) != 1:
+                raise
+            for x1 in range(len(self.index_1)):
+                if type(data[0][x1]) != type(0.0):
+                    raise
 
     def emit(self):
         output  = "%s (%s) {\n" % (self.name, self.template.name)
-        output += indent("index_1 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_1)))
+        output += indent("index_1 (\"%s\");\n" % ", ".join(map(to_s, self.index_1)))
         if self.twod:
-            output += indent("index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2)))
+            output += indent("index_2 (\"%s\");\n" % ", ".join(map(to_s, self.index_2)))
         output += indent("values ( \\\n")
-        output += indent(", \\\n".join(map(lambda y: "\"" + ", ".join(map(lambda x: x.__str__(), y)) + "\"", self.data)) + " \\\n",2)
+        output += indent(", \\\n".join(map(lambda y: "\"" + ", ".join(map(to_s, y)) + "\"", self.data)) + " \\\n",2)
         output += indent(");\n")
         output += "}\n"
         return output
@@ -432,7 +471,7 @@ def require_int(obj, key):
 def indent(s, lvl=1):
     return re.compile('^([^\n])',re.MULTILINE).sub(" " * IWIDTH * lvl + "\\1", s)
 
-def read_library_json(libfile, cornerfile, library_namer=default_library_namer):
+def read_library_json(libfile, cornerfile, library_namer=default_library_namer, characterizer=default_characterizer):
     try:
         lib_attr = json.load(file(libfile))
     except:
@@ -443,4 +482,4 @@ def read_library_json(libfile, cornerfile, library_namer=default_library_namer):
     except:
         sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % cornerfile)
         exit(1)
-    return Library(lib_attr, corner_attr, library_namer)
+    return Library(lib_attr, corner_attr, library_namer, characterizer)

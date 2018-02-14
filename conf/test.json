@@ -9,6 +9,7 @@
                     "name" : "foo",
                     "direction" : "input",
                     "capacitance" : 0.1,
+                    "max_transition" : 0.2,
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 },
@@ -16,6 +17,7 @@
                     "name" : "bar",
                     "direction" : "output",
                     "max_capacitance" : 0.5,
+                    "max_transition" : 0.2,
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 },
@@ -23,6 +25,24 @@
                     "name" : "baz",
                     "direction" : "inout",
                     "is_analog" : true,
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                },
+                {
+                    "name" : "clock",
+                    "direction" : "input",
+                    "clock" : true,
+                    "capacitance" : 0.1,
+                    "max_transition" : 0.2,
+                    "related_power_pin" : "VDD",
+                    "related_ground_pin" : "VSS"
+                },
+                {
+                    "name" : "foo",
+                    "direction" : "output",
+                    "sequential" : true,
+                    "related_clock" : "clock",
+                    "max_capacitance" : 0.1,
                     "related_power_pin" : "VDD",
                     "related_ground_pin" : "VSS"
                 }

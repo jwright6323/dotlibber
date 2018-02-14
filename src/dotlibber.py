@@ -116,11 +116,14 @@ class Cell:
         require_key(self, "pins")
         self.pg_pins = []
         self.pins = []
-        self.clocks = []
+        self.clocks = {}
+        self.sequential_pins = []
         for p in self.attr["pg_pins"]:
             self.add_pg_pin(p)
         for p in self.attr["pins"]:
             self.add_pin(p)
+        for p in self.sequential_pins:
+            p.generate_arcs()
 
     def power_pins(self):
         return filter(lambda x: x.type == "primary_power", self.pg_pins)
@@ -135,7 +138,13 @@ class Cell:
         self.pins.append(Pin(self, pin_attr))
 
     def add_clock(self, pin):
-        self.clocks.append(pin)
+        self.clocks[pin.name] = pin
+
+    def get_clock(self, name):
+        return self.clocks[name]
+
+    def add_sequential_pin(self, pin):
+        self.sequential_pins.append(pin)
 
     def emit(self):
         output  = "cell (%s) {\n" % self.name
@@ -155,23 +164,43 @@ class Pin:
         self.cell = cell
         self.attr = attr
         self.name = get_name(self)
+        self.arcs = []
         # Use a list here to enforce an ordering
         self.output_attr = []
         self.output_attr.append(("direction", require_values(self, "direction", ["input", "output", "inout"])))
+        self.direction = self.attr["direction"]
         self.is_analog = require_boolean(self, "is_analog", False)
-        self.clock = require_boolean(self, "clock", False)
         # Digital pin checks
         if not self.is_analog:
+            self.clock = require_boolean(self, "clock", False)
+            self.reset = require_boolean(self, "reset", False)
             if self.clock:
                 self.cell.add_clock(self)
+                self.sequential = False
                 self.output_attr.append(("clock", "true"))
-            if self.attr["direction"] == "inout":
+                if self.reset:
+                    sys.stderr.write("Pin \"%s\" of cell \"%s\" cannot be both clock and reset. Aborting.\n" % (self.name, self.cell.name))
+                    exit(1)
+            else:
+                self.sequential = require_boolean(self, "sequential", False)
+                if self.sequential:
+                    require_key(self, "related_clock")
+                    self.related_clock_name = self.attr["related_clock"]
+                    self.cell.add_sequential_pin(self)
+                else:
+                    self.related_clock_name = None
+
+            if self.direction == "inout":
                 sys.stderr.write("Digital inout pins are not supported. FIXME. Aborting\n")
                 exit(1)
-            if self.attr["direction"] == "input":
+
+            if self.direction == "input":
                 self.output_attr.append(("capacitance", require_float(self, "capacitance")))
-            if self.attr["direction"] == "output":
+                self.output_attr.append(("max_transition", require_float(self, "max_transition")))
+
+            if self.direction == "output":
                 self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance")))
+
             # Assert that we must have a power pin with the name in our PG pin list
             self.output_attr.append(("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()))))
             # Assert that we must have a ground pin with the name in our PG pin list
@@ -179,15 +208,105 @@ class Pin:
         else:
             self.output_attr.append(("is_analog", "true"))
 
+    def get_related_clock(self):
+        if self.related_clock_name is not None:
+            return self.cell.get_clock(self.related_clock_name)
 
     def has_attr(self, attr):
         return attr in self.attr.keys()
 
+    def generate_arcs(self):
+        if self.related_clock_name not in self.cell.clocks.keys():
+            sys.stderr.write("Related clock pin \"%s\" of pin \"%s\" of cell \"%s\" is not defined as a clock. Please give it the \"clock : true\" attribute. Aborting.\n" % (self.related_clock_name, self.name, self.cell.name))
+            exit(1)
+        else:
+            if self.direction == "input":
+                self.arcs.append(SetupQArc(self, self.get_related_clock()))
+                self.arcs.append(HoldArc(self, self.get_related_clock()))
+            elif self.direction == "output":
+                self.arcs.append(ClockToQArc(self, self.get_related_clock()))
+            else:
+                raise Exception("Should not get here, fix me. You have an inout sequential pin, or something else went wrong.")
+
     # TODO emit timing arcs
-    # TODO is there a better way to handle this
     def emit(self):
         attributes = "".join(map(lambda x: "%s : %s;\n" % (x[0], x[1]), self.output_attr))
+        for a in self.arcs:
+            attributes += a.emit()
         return "pin (%s) {\n" % self.name + indent(attributes) + "}\n"
+
+class SetupArc:
+
+    def __init__(self, pin, related_pin):
+        self.pin = pin
+        self.related_pin = related_pin
+        self.rise_constraint = DataTable("rise_constraint", self)
+        self.fall_constraint = DataTable("fall_constraint", self)
+
+    def emit(self):
+        output  = "related_pin : \"%s\";\n" % self.related_pin.name
+        # XXX we only support rising edge clocks!
+        output += "timing_type : setup_rising;\n"
+        output += self.rise_constraint.emit()
+        output += self.fall_constraint.emit()
+        return "timing () {\n" + indent(output) + "}\n"
+
+class HoldArc:
+
+    def __init__(self, pin, related_pin):
+        self.pin = pin
+        self.related_pin = related_pin
+        self.rise_constraint = DataTable("rise_constraint", self)
+        self.fall_constraint = DataTable("fall_constraint", self)
+
+    def emit(self):
+        output  = "related_pin : \"%s\";\n" % self.related_pin.name
+        # XXX we only support rising edge clocks!
+        output += "timing_type : hold_rising;\n"
+        output += self.rise_constraint.emit()
+        output += self.fall_constraint.emit()
+        return "timing () {\n" + indent(output) + "}\n"
+
+class ClockToQArc:
+
+    def __init__(self, pin, related_pin):
+        self.pin = pin
+        self.related_pin = related_pin
+        self.cell_rise = DataTable("cell_rise", self)
+        self.cell_fall = DataTable("cell_fall", self)
+        self.rise_transition = DataTable("rise_transition", self)
+        self.fall_transition = DataTable("fall_transition", self)
+
+    def emit(self):
+        output  = "related_pin : \"%s\";\n" % self.related_pin.name
+        output += "timing_sense : non_unate;\n"
+        # XXX we only support rising edge clocks!
+        output += "timing_type : rising_edge;\n"
+        output += self.cell_rise.emit()
+        output += self.rise_transition.emit()
+        output += self.cell_fall.emit()
+        output += self.fall_transition.emit()
+        return "timing () {\n" + indent(output) + "}\n"
+
+
+class DataTable:
+
+    def __init__(self, name, pin):
+        self.name = name
+        self.template_name = "template_3x3"
+        self.index_1 = [0.01, 0.02, 0.03]
+        self.index_2 = [0.01, 0.02, 0.03]
+        self.data = [[0.01, 0.02, 0.03,],[0.04,0.05,0.06],[0.07,0.08,0.09]]
+
+    def emit(self):
+        output  = "%s (%s) {\n" % (self.name, self.template_name)
+        output += indent("index_1 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_1)))
+        output += indent("index_2 (\"%s\");\n" % ", ".join(map(lambda x: x.__str__(), self.index_2)))
+        output += indent("values ( \\\n")
+        output += indent(", \\\n".join(map(lambda y: "\"" + ", ".join(map(lambda x: x.__str__(), y)) + "\"", self.data)) + " \\\n",2)
+        output += indent(");\n")
+        output += "}\n"
+        return output
 
 class PGPin:
 
@@ -248,14 +367,14 @@ def optional_values(obj, key, values, default=None):
 def require_float(obj, key):
     require_key(obj, key)
     if (type(obj.attr[key]) != type(0.0)):
-        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
+        sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)
     return obj.attr[key]
 
 def require_int(obj, key):
     require_key(obj, key)
     if (type(obj.attr[key]) != type(0)):
-        sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
+        sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)
     return obj.attr[key]
 

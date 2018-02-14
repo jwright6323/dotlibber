@@ -158,11 +158,11 @@ class Pin:
         # Use a list here to enforce an ordering
         self.output_attr = []
         self.output_attr.append(("direction", require_values(self, "direction", ["input", "output", "inout"])))
-        optional_values(self, "is_analog", [True, False], False)
-        optional_values(self, "clock", [True, False], False)
+        self.is_analog = require_boolean(self, "is_analog", False)
+        self.clock = require_boolean(self, "clock", False)
         # Digital pin checks
-        if not self.attr["is_analog"]:
-            if self.attr["clock"]:
+        if not self.is_analog:
+            if self.clock:
                 self.cell.add_clock(self)
                 self.output_attr.append(("clock", "true"))
             if self.attr["direction"] == "inout":
@@ -173,9 +173,9 @@ class Pin:
             if self.attr["direction"] == "output":
                 self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance")))
             # Assert that we must have a power pin with the name in our PG pin list
-            require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()))
+            self.output_attr.append(("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()))))
             # Assert that we must have a ground pin with the name in our PG pin list
-            require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()))
+            self.output_attr.append(("related_ground_pin",require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()))))
         else:
             self.output_attr.append(("is_analog", "true"))
 
@@ -219,29 +219,41 @@ def require_key(obj, key):
         sys.stderr.write("Missing required key \"%s\" for %s object %s. Aborting.\n" % (key, obj.__class__.__name__, obj.name))
         exit(1)
 
+def require_boolean(obj, key, default=None):
+    if key in obj.attr:
+        if type(obj.attr[key]) != type(False):
+            sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Must be true or false. Aborting.\n" % (obj.attr[key].__str__(), key, obj.__class__.__name__, obj.name))
+            exit(1)
+        return obj.attr[key]
+    else:
+        if default is not None:
+            return default
+        else:
+            require_key(obj, key)
+
 def require_values(obj, key, values):
     require_key(obj, key)
     if obj.attr[key] not in values:
-        sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Allowed values are %s. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name, ', '.join(values)))
+        sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Allowed values are %s. Aborting.\n" % (obj.attr[key].__str__(), key, obj.__class__.__name__, obj.name, ', '.join(values)))
         exit(1)
     return obj.attr[key]
 
 def optional_values(obj, key, values, default=None):
     if key in obj.attr:
         require_values(obj, key, values)
+        return obj.attr[key]
     else:
-        if default is not None:
-            obj.attr[key] = default
-            require_values(obj, key, values)
-    return obj.attr[key]
+        return default
 
 def require_float(obj, key):
+    require_key(obj, key)
     if (type(obj.attr[key]) != type(0.0)):
         sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)
     return obj.attr[key]
 
 def require_int(obj, key):
+    require_key(obj, key)
     if (type(obj.attr[key]) != type(0)):
         sys.stderr.write("Invalid entry %s for attribute %s of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)

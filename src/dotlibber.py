@@ -178,7 +178,7 @@ class Cell:
                 lower = min(a,b)
                 upper = max(a,b)
                 base = m.group(1)
-                for x in range(upper-lower):
+                for x in range(upper-lower+1):
                     p["name"] = base + "[%d]" % (lower+x)
                     self.add_pin(p)
             else:

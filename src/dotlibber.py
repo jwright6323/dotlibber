@@ -167,6 +167,9 @@ class Cell:
         self.pins = []
         self.clocks = {}
         self.sequential_pins = []
+        self.defaults = {}
+        if ("defaults" in self.attr.keys()):
+            self.defaults = self.attr["defaults"]
         for p in self.attr["pg_pins"]:
             self.add_pg_pin(p)
         for p in self.attr["pins"]:
@@ -197,7 +200,7 @@ class Cell:
         self.pg_pins.append(PGPin(self, pg_pin_attr))
 
     def add_pin(self, pin_attr):
-        self.pins.append(Pin(self, pin_attr))
+        self.pins.append(Pin(self, pin_attr, self.defaults))
 
     def add_clock(self, pin):
         self.clocks[pin.name] = pin
@@ -222,7 +225,7 @@ class Cell:
 
 class Pin:
 
-    def __init__(self, cell, attr):
+    def __init__(self, cell, attr, defaults):
         self.cell = cell
         self.attr = attr
         self.name = get_name(self)
@@ -259,16 +262,16 @@ class Pin:
                 exit(1)
 
             if self.direction == "input":
-                self.output_attr.append(("capacitance", require_float(self, "capacitance")))
-                self.output_attr.append(("max_transition", require_float(self, "max_transition")))
+                self.output_attr.append(("capacitance", require_float(self, "capacitance", defaults)))
+                self.output_attr.append(("max_transition", require_float(self, "max_transition", defaults)))
 
             if self.direction == "output":
-                self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance")))
+                self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance", defaults)))
 
             # Assert that we must have a power pin with the name in our PG pin list
-            self.output_attr.append(("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()))))
+            self.output_attr.append(("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()), defaults)))
             # Assert that we must have a ground pin with the name in our PG pin list
-            self.output_attr.append(("related_ground_pin",require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()))))
+            self.output_attr.append(("related_ground_pin",require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()), defaults)))
         else:
             self.output_attr.append(("is_analog", "true"))
 
@@ -440,6 +443,15 @@ def require_key(obj, key):
         sys.stderr.write("Missing required key \"%s\" for %s object %s. Aborting.\n" % (key, obj.__class__.__name__, obj.name))
         exit(1)
 
+def require_key_or_default(obj, key, default=None):
+    if default is not None:
+        if type(default) is dict:
+            if key in default.keys():
+                obj.attr[key] = default[key]
+        elif key not in obj.attr.keys():
+            obj.attr[key] = default
+    require_key(obj, key)
+
 def require_boolean(obj, key, default=None):
     if key in obj.attr:
         if type(obj.attr[key]) != type(False):
@@ -452,8 +464,8 @@ def require_boolean(obj, key, default=None):
         else:
             require_key(obj, key)
 
-def require_values(obj, key, values):
-    require_key(obj, key)
+def require_values(obj, key, values, default=None):
+    require_key_or_default(obj, key, default)
     if obj.attr[key] not in values:
         sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Allowed values are %s. Aborting.\n" % (obj.attr[key].__str__(), key, obj.__class__.__name__, obj.name, ', '.join(values)))
         exit(1)
@@ -466,15 +478,15 @@ def optional_values(obj, key, values, default=None):
     else:
         return default
 
-def require_float(obj, key):
-    require_key(obj, key)
+def require_float(obj, key, default=None):
+    require_key_or_default(obj, key, default)
     if (type(obj.attr[key]) != type(0.0)):
         sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Must be a float. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)
     return obj.attr[key]
 
-def require_int(obj, key):
-    require_key(obj, key)
+def require_int(obj, key, default=None):
+    require_key_or_default(obj, key, default)
     if (type(obj.attr[key]) != type(0)):
         sys.stderr.write("Invalid entry \"%s\" for attribute \"%s\" of %s object %s. Must be a int. Aborting.\n" % (obj.attr[key], key, obj.__class__.__name__, obj.name))
         exit(1)

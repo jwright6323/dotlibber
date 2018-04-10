@@ -18,7 +18,7 @@ def default_file_namer(lib, corner):
     return os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "output", default_library_namer(lib, corner) + ".lib")
 
 default_characterizer_global = 0.0
-def default_characterizer(arc_type, corner, params):
+def default_characterizer(arc_type, timing_type, pin, related_pin, corner, params):
     global default_characterizer_global
     default_characterizer_global += 0.1
     return default_characterizer_global
@@ -28,6 +28,9 @@ class Corner:
     def __init__(self, attr, characterizer):
         self.attr = attr
         self.name = get_name(self)
+        self.short_name = self.name
+        if "short_name" in self.attr.keys():
+            self.short_name = self.attr["short_name"]
         self.process = require_int(self, "process")
         self.temperature = require_int(self, "temperature")
         require_key(self, "voltage_map")
@@ -42,7 +45,7 @@ class Corner:
             x = self.attr["constraint_template"]
             self.constraint_template = LUTTemplate("constraint_template_%dx%d" % (len(x["related_pin_transition"]),len(x["constrained_pin_transition"])),
                 "related_pin_transition",
-                x["constrained_pin_transition"],
+                x["related_pin_transition"],
                 "constrained_pin_transition",
                 x["constrained_pin_transition"])
             x = self.attr["delay_template"]
@@ -307,8 +310,8 @@ class SetupArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = generate_data_table("rise_constraint", pin, related_pin, corner.delay_template, corner)
-        self.fall_constraint = generate_data_table("fall_constraint", pin, related_pin, corner.delay_template, corner)
+        self.rise_constraint = generate_data_table("rise_constraint", "setup_rising", pin, related_pin, corner.constraint_template, corner)
+        self.fall_constraint = generate_data_table("fall_constraint", "setup_rising", pin, related_pin, corner.constraint_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -323,8 +326,8 @@ class HoldArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.rise_constraint = generate_data_table("rise_constraint", pin, related_pin, corner.delay_template, corner)
-        self.fall_constraint = generate_data_table("fall_constraint", pin, related_pin, corner.delay_template, corner)
+        self.rise_constraint = generate_data_table("rise_constraint", "hold_rising", pin, related_pin, corner.constraint_template, corner)
+        self.fall_constraint = generate_data_table("fall_constraint", "hold_rising", pin, related_pin, corner.constraint_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -339,10 +342,10 @@ class ClockToQArc:
     def __init__(self, pin, related_pin, corner):
         self.pin = pin
         self.related_pin = related_pin
-        self.cell_rise = generate_data_table("cell_rise", pin, related_pin, corner.constraint_template, corner)
-        self.cell_fall = generate_data_table("cell_fall", pin, related_pin, corner.constraint_template, corner)
-        self.rise_transition = generate_data_table("rise_transition", pin, related_pin, corner.constraint_template, corner)
-        self.fall_transition = generate_data_table("fall_transition", pin, related_pin, corner.constraint_template, corner)
+        self.cell_rise = generate_data_table("cell_rise", "rising_edge", pin, related_pin, corner.delay_template, corner)
+        self.cell_fall = generate_data_table("cell_fall", "rising_edge", pin, related_pin, corner.delay_template, corner)
+        self.rise_transition = generate_data_table("rise_transition", "rising_edge", pin, related_pin, corner.delay_template, corner)
+        self.fall_transition = generate_data_table("fall_transition", "rising_edge", pin, related_pin, corner.delay_template, corner)
 
     def emit(self):
         output  = "related_pin : \"%s\";\n" % self.related_pin.name
@@ -355,7 +358,7 @@ class ClockToQArc:
         output += self.fall_transition.emit()
         return "timing () {\n" + indent(output) + "}\n"
 
-def generate_data_table(arc_type, pin, related_pin, template, corner):
+def generate_data_table(arc_type, timing_type, pin, related_pin, template, corner):
     len1 = len(template.index_1)
     len2 = len(template.index_2) if template.twod else 1
     data = [[None for i in range(len1)] for j in range(len2)]
@@ -365,7 +368,7 @@ def generate_data_table(arc_type, pin, related_pin, template, corner):
             params[template.var1] = template.index_1[x1]
             if template.twod:
                 params[template.var2] = template.index_2[x2]
-            data[x2][x1] = corner.characterizer(arc_type, corner, params)
+            data[x2][x1] = corner.characterizer(arc_type, timing_type, pin, related_pin, corner, params)
     return DataTable(arc_type, template, data)
 
 class DataTable:

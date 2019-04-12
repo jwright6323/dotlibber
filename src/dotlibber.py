@@ -92,14 +92,15 @@ class Library:
         require_key(self,"cells")
         self.cells = []
         self.library_namer = library_namer
+        self.bus_types = {}
         for a in self.attr["cells"]:
-            self.add_cell(a)
+            self.add_cell(a, self.bus_types)
 
     def voltage_names(self):
         return self.corners[0].voltage_map.keys()
 
-    def add_cell(self, cell_attr):
-        self.cells.append(Cell(self, cell_attr))
+    def add_cell(self, cell_attr, bus_types):
+        self.cells.append(Cell(self, cell_attr, bus_types))
 
     def add_corner(self, corner_attr, characterizer):
         self.corners.append(Corner(corner_attr, characterizer))
@@ -122,6 +123,7 @@ class Library:
         header += corner.emit()
         output += indent(header)
         output += "\n"
+        output += "\n".join(list(map(lambda kv: kv[1], self.bus_types.iteritems())))
         for c in self.cells:
             output += indent(c.emit(corner))
             output += "\n"
@@ -160,7 +162,7 @@ class LUTTemplate:
 
 class Cell:
 
-    def __init__(self, lib, attr):
+    def __init__(self, lib, attr, bus_types):
         self.lib = lib
         self.attr = attr
         self.name = get_name(self)
@@ -184,9 +186,21 @@ class Cell:
                 lower = min(a,b)
                 upper = max(a,b)
                 base = m.group(1)
-                for x in range(upper-lower+1):
-                    p["name"] = base + "[%d]" % (lower+x)
-                    self.add_pin(p)
+                p["name"] = base
+                p["is_bus"] = True
+                p["bus_max"] = upper
+                p["bus_min"] = lower
+                self.add_pin(p)
+                bus_types[(upper, lower)] = """
+    type (bus_%d_to_%d) {
+        base_type : array ;
+        data_type : bit ;
+        bit_width : %d ;
+        bit_from : %d ;
+        bit_to : %d ;
+        downto : true ;
+    }\n""" % (upper, lower, upper-lower+1, upper, lower)
+
             else:
                 self.add_pin(p)
         for p in self.sequential_pins:
@@ -237,6 +251,13 @@ class Pin:
             self.arcs[c] = []
         # Use a list here to enforce an ordering
         self.output_attr = []
+        self.bus_attr = []
+        # bus_type must be first
+        self.is_bus = require_boolean(self, "is_bus", False)
+        if(self.is_bus):
+            self.bus_max = require_int(self, "bus_max", 0)
+            self.bus_min = require_int(self, "bus_min", 0)
+            self.output_attr.append(("bus_type", "bus_%d_to_%d" %(self.bus_max, self.bus_min)))
         self.output_attr.append(("direction", require_values(self, "direction", ["input", "output", "inout"])))
         self.direction = self.attr["direction"]
         self.is_analog = require_boolean(self, "is_analog", False)
@@ -272,9 +293,15 @@ class Pin:
                 self.output_attr.append(("max_capacitance", require_float(self, "max_capacitance", defaults)))
 
             # Assert that we must have a power pin with the name in our PG pin list
-            self.output_attr.append(("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()), defaults)))
+            related_power_pin = ("related_power_pin",require_values(self, "related_power_pin", map(lambda x: x.name, self.cell.power_pins()), defaults))
             # Assert that we must have a ground pin with the name in our PG pin list
-            self.output_attr.append(("related_ground_pin",require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()), defaults)))
+            related_ground_pin = ("related_ground_pin",require_values(self, "related_ground_pin", map(lambda x: x.name, self.cell.ground_pins()), defaults))
+            if self.is_bus:
+                self.bus_attr.append(related_power_pin)
+                self.bus_attr.append(related_ground_pin)
+            else:
+                self.output_attr.append(related_power_pin)
+                self.output_attr.append(related_ground_pin)
         else:
             self.output_attr.append(("is_analog", "true"))
 
@@ -300,10 +327,16 @@ class Pin:
 
     def emit(self, corner):
         attributes = "".join(map(lambda x: "%s : %s;\n" % (x[0], x[1]), self.output_attr))
+        bus_attributes = "".join(map(lambda x: "%s : %s;\n" % (x[0], x[1]), self.bus_attr))
         # TODO some attributes are corner-specific (cap, max_cap, etc.) and need to be characterized
         for a in self.arcs[corner]:
             attributes += a.emit()
-        return "pin (%s) {\n" % self.name + indent(attributes) + "}\n"
+        if self.is_bus:
+            output = "bus ( %s ) {\n" % self.name + indent(attributes) + "\n"
+            output += indent("pin ( %s[%d:%d] ) {\n" % (self.name, self.bus_max, self.bus_min) + indent(bus_attributes) + "}\n") + "}\n"
+        else:
+            output = "pin (%s) {\n" % self.name + indent(attributes) + "}\n"
+        return output
 
 class SetupArc:
 

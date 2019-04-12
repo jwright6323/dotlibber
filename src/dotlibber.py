@@ -131,9 +131,15 @@ class Library:
         output += "}\n"
         return output
 
-    def write_all(self, file_namer=default_file_namer):
+
+    def write_all(self, file_namer=default_file_namer, file_dir=None):
+
         for corner in self.corners:
-            f = file_namer(self, corner)
+            if not(file_dir is None):
+                f = os.path.join(file_dir, file_namer(self, corner))
+            else:
+                f = file_namer(self, corner)
+                
             # this is basically mkdir -p
             try:
                 os.makedirs(os.path.dirname(f))
@@ -178,7 +184,12 @@ class Cell:
         for p in self.attr["pg_pins"]:
             self.add_pg_pin(p)
         for p in self.attr["pins"]:
-            m = re.match(r"^([\w_]+)\[(\d+):(\d+)]$", p["name"]) if "name" in p.keys() else False
+            ###matches bus defined with [upper:lower] and <upper:lower>
+            m = re.match(r"^([\w_]+)[\[<](\d+):(\d+)[\]>]$", p["name"]) if "name" in p.keys() else False 
+
+            ####matches bus defined with [upper:lower]           
+            #m = re.match(r"^([\w_]+)\[(\d+):(\d+)]$", p["name"]) if "name" in p.keys() else False
+
             if m:
                 # This is a bus
                 a = int(m.group(2))
@@ -533,12 +544,12 @@ def indent(s, lvl=1):
 
 def read_library_json(libfile, cornerfile, library_namer=default_library_namer, characterizer=default_characterizer):
     try:
-        lib_attr = json.load(file(libfile))
+        lib_attr = json.load(open(libfile))
     except:
         sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % libfile)
         exit(1)
     try:
-        corner_attr = json.load(file(cornerfile))["corners"]
+        corner_attr = json.load(open(cornerfile))["corners"]
     except:
         sys.stderr.write("Syntax error parsing JSON file %s. Aborting.\n" % cornerfile)
         exit(1)
